@@ -64,7 +64,7 @@ class MessageBuffer(object):
         # Set an empty result to unblock any coroutines waiting.
         future.set_result([])
 
-   def new_messages(self, messages):
+    def new_messages(self, messages):
         logging.info("Sending new message to %r listeners", len(self.waiters))
         for future in self.waiters:
             future.set_result(messages)
