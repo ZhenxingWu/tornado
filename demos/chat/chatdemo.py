@@ -20,12 +20,17 @@ import tornado.ioloop
 import tornado.web
 import os.path
 import uuid
+import requests
+import time
+import datetime
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
 
 from tornado.concurrent import Future
 from tornado import gen
 from tornado.options import define, options, parse_command_line
 
-define("port", default=8888, help="run on the given port", type=int)
+define("port", default=80, help="run on the given port", type=int)
 define("debug", default=False, help="run in debug mode")
 
 
@@ -34,6 +39,7 @@ class MessageBuffer(object):
         self.waiters = set()
         self.cache = []
         self.cache_size = 200
+        self.db = boto3.resource('dynamodb').Table('chat')
 
     def wait_for_messages(self, cursor=None):
         # Construct a Future to return to our caller.  This allows
@@ -64,22 +70,31 @@ class MessageBuffer(object):
             future.set_result(messages)
         self.waiters = set()
         self.cache.extend(messages)
+
+        for message in messages:
+            self.db.put_item(Item=message)#{'instance-id':self.instance_id+messages['id'], 'message':messages})
         if len(self.cache) > self.cache_size:
             self.cache = self.cache[-self.cache_size:]
 
 
 # Making this a non-singleton is left as an exercise for the reader.
 global_message_buffer = MessageBuffer()
-
+global_timestamp =0
+instance_id = requests.get('http://169.254.169.254/latest/meta-data/instance-id').text
+az= requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone').text 
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
-        self.render("index.html", messages=global_message_buffer.cache)
+        self.render("index.html", messages=global_message_buffer.cache, instance=instance_id, az=az)
 
 
 class MessageNewHandler(tornado.web.RequestHandler):
     def post(self):
+        global global_timestamp
+        global_timestamp  = int(time.mktime(datetime.datetime.utcnow().timetuple()))
         message = {
+            "instance": instance_id,# +"---"+ str(uuid.uuid4()),
+            "timestamp": global_timestamp,
             "id": str(uuid.uuid4()),
             "body": self.get_argument("body"),
         }
@@ -95,6 +110,8 @@ class MessageNewHandler(tornado.web.RequestHandler):
 
 
 class MessageUpdatesHandler(tornado.web.RequestHandler):
+    def check_origin(self, origin):  
+        return True  
     @gen.coroutine
     def post(self):
         cursor = self.get_argument("cursor", None)
@@ -109,6 +126,12 @@ class MessageUpdatesHandler(tornado.web.RequestHandler):
     def on_connection_close(self):
         global_message_buffer.cancel_wait(self.future)
 
+def updateDB():
+    ### TODO update DynamoDB here##
+    response =global_message_buffer.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp))
+    if len(response['Items']) > 0:
+        global_timestamp.cache.extend(response['Items'])
+        print global_timestamp, len(response['Items'])
 
 def main():
     parse_command_line()
@@ -125,7 +148,8 @@ def main():
         debug=options.debug,
         )
     app.listen(options.port)
-    tornado.ioloop.IOLoop.current().start()
+    tornado.ioloop.PeriodicCallback(updateDB, 3000).start() 
+    tornado.ioloop.IOLoop.instance().start()#current().start()
 
 
 if __name__ == "__main__":
