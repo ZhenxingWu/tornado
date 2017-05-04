@@ -64,34 +64,35 @@ class MessageBuffer(object):
         # Set an empty result to unblock any coroutines waiting.
         future.set_result([])
 
-    def new_messages(self, messages):
+   def new_messages(self, messages):
         logging.info("Sending new message to %r listeners", len(self.waiters))
         for future in self.waiters:
             future.set_result(messages)
         self.waiters = set()
-        self.cache.extend(messages)
-
         for message in messages:
             self.db.put_item(Item=message)#{'instance-id':self.instance_id+messages['id'], 'message':messages})
+        self.updateCache(messages)
+
+    def updateCache(self, messages):
+        self.cache.extend(messages)
         if len(self.cache) > self.cache_size:
             self.cache = self.cache[-self.cache_size:]
-            
+
     def updateDB(self):
         global global_timestamp
         response =self.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp), Limit=100)
         if len(response['Items']) > 0:
-            self.cache.extend(response['Items'])
-            if len(self.cache) > self.cache_size:
-                self.cache = self.cache[-self.cache_size:]
-            print global_timestamp, len(response['Items'])
-            global_timestamp = response['Items'][-1]['timestamp']
-            message = [].extend(response['Items'])
+            messages = []
+            messages.extend(response['Items'])
+            self.updateCache(messages)
             for message in messages:
-                message['timestamp'] = str(message['timestamp'])
+                message['timestamp']=str(message['timestamp'])
             for future in self.waiters:
                 future.set_result(messages)
             self.waiters = set()
-
+            print global_timestamp, response['Items']
+            global_timestamp = response['Items'][-1]['timestamp']
+            
 # Making this a non-singleton is left as an exercise for the reader.
 global_message_buffer = MessageBuffer()
 global_timestamp =0
