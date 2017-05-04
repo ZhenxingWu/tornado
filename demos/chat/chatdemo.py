@@ -128,10 +128,12 @@ class MessageUpdatesHandler(tornado.web.RequestHandler):
 
 def updateDB():
     ### TODO update DynamoDB here##
-    response =global_message_buffer.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp))
+    global global_timestamp
+    response =global_message_buffer.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp), Limit=100)
     if len(response['Items']) > 0:
-        global_timestamp.cache.extend(response['Items'])
+        global_message_buffer.cache.extend(response['Items'])
         print global_timestamp, len(response['Items'])
+        global_timestamp = response['Items'][-1]['timestamp']
 
 def main():
     parse_command_line()
