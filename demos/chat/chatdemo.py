@@ -75,7 +75,22 @@ class MessageBuffer(object):
             self.db.put_item(Item=message)#{'instance-id':self.instance_id+messages['id'], 'message':messages})
         if len(self.cache) > self.cache_size:
             self.cache = self.cache[-self.cache_size:]
-
+            
+    def updateDB(self):
+        global global_timestamp
+        response =self.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp), Limit=100)
+        if len(response['Items']) > 0:
+            self.cache.extend(response['Items'])
+            if len(self.cache) > self.cache_size:
+                self.cache = self.cache[-self.cache_size:]
+            print global_timestamp, len(response['Items'])
+            global_timestamp = response['Items'][-1]['timestamp']
+            message = [].extend(response['Items'])
+            for message in messages:
+                message['timestamp'] = str(message['timestamp'])
+            for future in self.waiters:
+                future.set_result(messages)
+            self.waiters = set()
 
 # Making this a non-singleton is left as an exercise for the reader.
 global_message_buffer = MessageBuffer()
@@ -126,14 +141,7 @@ class MessageUpdatesHandler(tornado.web.RequestHandler):
     def on_connection_close(self):
         global_message_buffer.cancel_wait(self.future)
 
-def updateDB():
-    ### TODO update DynamoDB here##
-    global global_timestamp
-    response =global_message_buffer.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp), Limit=100)
-    if len(response['Items']) > 0:
-        global_message_buffer.cache.extend(response['Items'])
-        print global_timestamp, len(response['Items'])
-        global_timestamp = response['Items'][-1]['timestamp']
+
 
 def main():
     parse_command_line()
@@ -150,7 +158,7 @@ def main():
         debug=options.debug,
         )
     app.listen(options.port)
-    tornado.ioloop.PeriodicCallback(updateDB, 3000).start() 
+    tornado.ioloop.PeriodicCallback(global_message_buffer.updateDB, 3000).start() 
     tornado.ioloop.IOLoop.instance().start()#current().start()
 
 
