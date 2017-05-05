@@ -39,7 +39,11 @@ class MessageBuffer(object):
         self.waiters = set()
         self.cache = []
         self.cache_size = 200
-        self.db = boto3.resource('dynamodb').Table('chat')
+        self.global_timestamp =0
+        self.instance_id = requests.get('http://169.254.169.254/latest/meta-data/instance-id').text
+        self.az= requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone').text
+        self.region= self.az[0:-1]
+        self.db = boto3.resource('dynamodb', region_name=self.region).Table('chat')
 
     def wait_for_messages(self, cursor=None):
         # Construct a Future to return to our caller.  This allows
@@ -79,8 +83,7 @@ class MessageBuffer(object):
             self.cache = self.cache[-self.cache_size:]
 
     def updateDB(self):
-        global global_timestamp
-        response =self.db.scan(FilterExpression=Key('timestamp').gt(global_timestamp), Limit=100)
+        response =self.db.scan(FilterExpression=Key('timestamp').gt(self.global_timestamp), Limit=100)
         if len(response['Items']) > 0:
             messages = []
             messages.extend(response['Items'])
@@ -90,27 +93,24 @@ class MessageBuffer(object):
             for future in self.waiters:
                 future.set_result(messages)
             self.waiters = set()
-            print global_timestamp, response['Items']
-            global_timestamp = response['Items'][-1]['timestamp']
+            print self.global_timestamp, response['Items']
+            self.global_timestamp = response['Items'][-1]['timestamp']
             
 # Making this a non-singleton is left as an exercise for the reader.
 global_message_buffer = MessageBuffer()
-global_timestamp =0
-instance_id = requests.get('http://169.254.169.254/latest/meta-data/instance-id').text
-az= requests.get('http://169.254.169.254/latest/meta-data/placement/availability-zone').text 
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
-        self.render("index.html", messages=global_message_buffer.cache, instance=instance_id, az=az)
+        self.render("index.html", messages=global_message_buffer.cache, 
+                        instance=global_message_buffer.instance_id, az=global_message_buffer.az)
 
 
 class MessageNewHandler(tornado.web.RequestHandler):
     def post(self):
-        global global_timestamp
-        global_timestamp  = int(time.mktime(datetime.datetime.utcnow().timetuple()))
+        global_message_buffer.global_timestamp  = int(time.mktime(datetime.datetime.utcnow().timetuple()))
         message = {
-            "instance": instance_id,# +"---"+ str(uuid.uuid4()),
-            "timestamp": global_timestamp,
+            "instance": global_message_buffer.instance_id,# +"---"+ str(uuid.uuid4()),
+            "timestamp": global_message_buffer.global_timestamp,
             "id": str(uuid.uuid4()),
             "body": self.get_argument("body"),
         }
