@@ -83,8 +83,8 @@ class MessageBuffer(object):
             self.cache = self.cache[-self.cache_size:]
 
     def updateDB(self):
-        response =self.db.scan(FilterExpression=(Key('instance').lt(self.instance)
-                         | Key('instance').gt(self.instance))
+        response =self.db.scan(FilterExpression=(Key('instance').lt(self.instance_id)
+                         | Key('instance').gt(self.instance_id))
                          & Key('timestamp').gt(self.global_timestamp), Limit=100)
         if len(response['Items']) > 0:
             messages = []
