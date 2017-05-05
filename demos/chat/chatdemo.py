@@ -85,7 +85,7 @@ class MessageBuffer(object):
     def updateDB(self):
         response =self.db.scan(FilterExpression=(Key('instance').lt(self.instance_id)
                          | Key('instance').gt(self.instance_id))
-                         & Key('timestamp').gt(int(time.mktime(datetime.datetime.utcnow().timetuple()))), Limit=100)
+                         & Key('timestamp').gt(self.global_timestamp), Limit=100)
         if len(response['Items']) > 0:
             messages = []
             messages.extend(response['Items'])
@@ -109,10 +109,9 @@ class MainHandler(tornado.web.RequestHandler):
 
 class MessageNewHandler(tornado.web.RequestHandler):
     def post(self):
-        global_message_buffer.global_timestamp  = int(time.mktime(datetime.datetime.utcnow().timetuple()))
         message = {
             "instance": global_message_buffer.instance_id,# +"---"+ str(uuid.uuid4()),
-            "timestamp": global_message_buffer.global_timestamp,
+            "timestamp": int(time.mktime(datetime.datetime.utcnow().timetuple())),
             "id": str(uuid.uuid4()),
             "body": self.get_argument("body"),
         }
